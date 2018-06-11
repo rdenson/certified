@@ -1,0 +1,69 @@
+---
+- name: Generate Host Certificate
+  gather_facts: false
+  hosts: "{{ affected_hosts }}"
+  become: yes
+  tasks:
+    ### Generate PKI Directories
+    - name: PKI host cert directory
+      file:
+        path: /etc/pki/tls/certs/{{ inventory_hostname }}
+        state: directory
+    - name: PKI host private directory
+      file:
+        path: /etc/pki/tls/private/{{ inventory_hostname }}
+        state: directory
+
+    # host specific private key
+    - name: generate host key
+      shell: >
+        openssl genrsa
+        -out {{ pki.host.key.path }}
+        2048
+
+    ### Create the Certifcate Signing Request From the Private Key
+    # generate a CSR WITHOUT a subject alternative name
+    - name: generate certificate signing request
+      shell: >
+        openssl req
+        -new
+        -subj '/C=US/ST=Texas/L=Austin/O={{ csr_organization }}/CN={{ inventory_hostname }}'
+        -key {{ pki.host.key.path }}
+        -out {{ pki.host.certificate_signing_request.path }}
+      when: csr_san is undefined or csr_san == ""
+
+    # generate a CSR WITH a subject alternative name
+    - name: amend openssl configuration
+      blockinfile:
+        dest: /etc/pki/tls/openssl.cnf
+        block: |
+          [SAN]
+          subjectAltName=DNS:{{ csr_san }}
+      when: csr_san is defined and csr_san != ""
+    - name: generate certificate signing request with a subject alternative name
+      shell: >
+        openssl req
+        -new
+        -subj '/C=US/ST=Texas/L=Austin/O={{ csr_organization }}/CN={{ inventory_hostname }}'
+        -reqexts SAN
+        -key {{ pki.host.key.path }}
+        -out {{ pki.host.certificate_signing_request.path }}
+      when: csr_san is defined and csr_san != ""
+
+    # output CSR
+    - name: read CSR
+      shell: "cat {{ pki.host.certificate_signing_request.path }}"
+      no_log: yes
+      register: cat_res
+    - debug:
+        msg: "{{ cat_res.stdout_lines }}"
+    # the following may need more work...
+    #
+    # submit CSR to pki.allclearid.net (microsoft)
+    #- name: POST CSR to windows team
+    #  uri:
+    #    url: https://pki.service/certsrv/certfnsh.asp
+    #    method: POST
+    #    body: "Mode=newreq&CertRequest=&CertAttrib=CertificateTemplate%3AWebServerInternal&FriendlyType=Saved-Request+Certificate&ThumbPrint=&TargetStoreFlags=0&SaveCert=yes"
+    #    headers:
+    #      Content-Type: "application/x-www-form-urlencoded"

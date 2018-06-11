@@ -1,0 +1,24 @@
+---
+- name: search for cert alias
+  gather_facts: false
+  hosts: "{{ affected_hosts }}"
+  become: yes
+  tasks:
+    - name: inspect default store using keytool
+      shell: >
+        keytool
+        -list
+        -keystore /etc/pki/ca-trust/extracted/java/cacerts
+        -storepass changeit
+        -noprompt
+        | grep -E '{{ store_alias }}*'
+      ignore_errors: true
+      register: grep_result
+
+    #trying to pretty print findings
+    - name: query results
+      vars:
+        msg: "{{ grep_result.stdout }}"
+      debug:
+        msg: "{{ msg.split('\n') }}"
+      when: grep_result|succeeded
